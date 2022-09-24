@@ -2,8 +2,12 @@ package com.devsuperior.dscatlog.resources;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -22,6 +26,7 @@ import org.springframework.test.web.servlet.ResultActions;
 
 import com.devsuperior.dscatlog.dto.ProductDTO;
 import com.devsuperior.dscatlog.services.ProductService;
+import com.devsuperior.dscatlog.services.exceptions.DatabaseException;
 import com.devsuperior.dscatlog.services.exceptions.ResourceNotFoundException;
 import com.devsuperior.dscatlog.tests.Factory;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -40,6 +45,7 @@ public class ProductResourcesTests {
 
 	private Long existingId;
 	private Long nonExistingId;
+	private Long dependentId;
 	private ProductDTO productDTO;
 	private PageImpl<ProductDTO> page;
 	private ResultActions result;
@@ -50,6 +56,7 @@ public class ProductResourcesTests {
 
 		existingId = 1L;
 		nonExistingId = 2L;
+		dependentId = 3L;
 		productDTO = Factory.createProductDTO();
 		jsonBody = objectMapper.writeValueAsString(productDTO);
 		page = new PageImpl<>(List.of(productDTO));
@@ -61,6 +68,45 @@ public class ProductResourcesTests {
 
 		when(productService.findById(existingId)).thenReturn(productDTO);
 		when(productService.findById(nonExistingId)).thenThrow(ResourceNotFoundException.class);
+
+		when(productService.insert(any())).thenReturn(productDTO);
+
+		doNothing().when(productService).delete(existingId);
+		doThrow(ResourceNotFoundException.class).when(productService).delete(nonExistingId);
+		doThrow(DatabaseException.class).when(productService).delete(dependentId);
+	}
+
+	@Test
+	public void insertShouldCreateProduct() throws Exception {
+
+		result = mockMvc.perform(post("/products").content(jsonBody).contentType(MediaType.APPLICATION_JSON)
+				.accept(MediaType.APPLICATION_JSON));
+		
+		result.andExpect(status().isCreated());
+	}
+
+	@Test
+	public void deleteShouldDeleteWhenIdExists() throws Exception {
+
+		result = mockMvc.perform(delete("/products/{id}", existingId).accept(MediaType.APPLICATION_JSON));
+
+		result.andExpect(status().isNoContent());
+	}
+
+	@Test
+	public void deleteShouldThrowResourceNotFoundExceptionWhenIdDoesNotExist() throws Exception {
+
+		result = mockMvc.perform(delete("/products/{id}", nonExistingId).accept(MediaType.APPLICATION_JSON));
+
+		result.andExpect(status().isNotFound());
+	}
+
+	@Test
+	public void deleteShouldThrowDataIntegrityViolationExceptionWhenIdDependent() throws Exception {
+
+		result = mockMvc.perform(delete("/products/{id}", dependentId).accept(MediaType.APPLICATION_JSON));
+
+		result.andExpect(status().isBadRequest());
 	}
 
 	@Test
@@ -78,7 +124,7 @@ public class ProductResourcesTests {
 
 		result = mockMvc.perform(put("/products/{id}", nonExistingId).content(jsonBody)
 				.contentType(MediaType.APPLICATION_JSON).accept(MediaType.APPLICATION_JSON));
-		
+
 		result.andExpect(status().isNotFound());
 		result.andExpect(jsonPath("$.id").doesNotExist());
 	}
